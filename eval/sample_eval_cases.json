@@ -1,0 +1,13 @@
+[
+  {
+    "question": "What is the main purpose of the RAG assistant project?",
+    "expected_keywords": ["grounded", "citations", "retrieval"],
+    "expected_source": "project-brief"
+  },
+  {
+    "question": "Why does the MVP use a deterministic local embedder first?",
+    "expected_keywords": ["verify", "external services", "development"],
+    "expected_source": "architecture-notes"
+  }
+]
+

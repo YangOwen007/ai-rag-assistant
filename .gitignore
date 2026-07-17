@@ -1,0 +1,18 @@
+# Python build and virtual environment artifacts.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Node and Next.js artifacts.
+node_modules/
+.next/
+
+# Local environment files.
+.env
+.env.local
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+
