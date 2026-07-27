@@ -5,16 +5,18 @@
 The project is designed around a simple but credible flow:
 
 1. `Ingestion`
-   Accept source text and metadata.
+   Accept source text, uploads, and metadata.
 2. `Chunking`
    Split text into overlapping windows so retrieval can return focused evidence.
 3. `Embedding`
-   Convert chunks into vectors. The current build uses a deterministic local embedder for development.
-4. `Retrieval`
-   Rank chunks by semantic similarity to the question.
-5. `Grounded generation`
+   Convert chunks into vectors through a provider abstraction. The current build supports a deterministic local provider and an optional OpenAI provider.
+4. `Persistence`
+   Store documents and chunks in SQLAlchemy-managed tables so retrieval survives restarts.
+5. `Retrieval`
+   Rank chunks by semantic similarity to the question, using `pgvector` in PostgreSQL and a Python fallback in SQLite.
+6. `Grounded generation`
    Compose an answer using only retrieved context and return citations.
-6. `Evaluation`
+7. `Evaluation`
    Measure whether the right chunks are retrieved and whether citations point to the right evidence.
 
 ## Why this is a good portfolio shape
@@ -28,16 +30,17 @@ The project is designed around a simple but credible flow:
 
 ### Phase 1
 
-- text ingestion
+- text and PDF ingestion
 - deterministic embeddings
-- in-memory chunk index
+- persistent document and chunk storage
 - grounded answer API
+- migration support
 
 ### Phase 2
 
-- PDF parsing
-- PostgreSQL persistence
-- `pgvector` retrieval
+- OpenAI embeddings in deployed environments
+- verified PostgreSQL persistence
+- verified `pgvector` retrieval in production-like environments
 - document filters
 
 ### Phase 3
@@ -46,4 +49,3 @@ The project is designed around a simple but credible flow:
 - reranking
 - streaming responses
 - retrieval benchmarking dashboard
-

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.main import app, rag_service
+from app.main import app
 
 
 # This fixture text gives the retrieval pipeline a realistic-enough knowledge base for tests.
@@ -10,14 +10,6 @@ document ingestion, chunking, embeddings, retrieval, grounded answers, and
 traceable citations. The MVP should feel more serious than a toy chatbot and
 should be easy to explain in internship interviews.
 """
-
-
-def setup_function() -> None:
-    # Each test resets the in-memory index so assertions stay isolated and deterministic.
-    rag_service.documents.clear()
-    rag_service.document_chunks.clear()
-    rag_service.index._chunks.clear()
-
 
 def test_ingest_text_creates_chunks() -> None:
     client = TestClient(app)
@@ -35,6 +27,7 @@ def test_ingest_text_creates_chunks() -> None:
     payload = response.json()
     assert payload["title"] == "Project Brief"
     assert payload["chunk_count"] >= 1
+    assert payload["original_filename"] is None
 
 
 def test_query_returns_grounded_citations() -> None:
@@ -59,3 +52,22 @@ def test_query_returns_grounded_citations() -> None:
     assert len(payload["citations"]) >= 1
     assert payload["citations"][0]["source_label"] == "project-brief"
 
+
+def test_upload_text_document_persists_filename() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/documents/upload",
+        data={
+            "title": "Uploaded Notes",
+            "source_label": "course-notes",
+        },
+        files={
+            "file": ("notes.txt", (PROJECT_BRIEF * 3).encode("utf-8"), "text/plain"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["original_filename"] == "notes.txt"
+    assert payload["chunk_count"] >= 1

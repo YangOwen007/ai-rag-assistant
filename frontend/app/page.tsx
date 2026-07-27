@@ -14,6 +14,7 @@ type DocumentSummary = {
   title: string;
   source_label: string;
   chunk_count: number;
+  original_filename?: string | null;
 };
 
 type Citation = {
@@ -37,7 +38,7 @@ In this project, the goal is to build a grounded assistant that can ingest docum
 and return answers with citations so users can inspect the supporting evidence.`;
 
 
-// This page provides one polished screen for ingestion, querying, and inspecting retrieval evidence.
+// This page provides one polished screen for text ingestion, file uploads, querying, and evidence inspection.
 export default function HomePage() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -46,6 +47,7 @@ export default function HomePage() {
   const [sourceLabel, setSourceLabel] = useState("study-notes");
   const [text, setText] = useState(starterText);
   const [question, setQuestion] = useState("What does this assistant aim to do?");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [status, setStatus] = useState("Ready to ingest your first document.");
   const [loading, setLoading] = useState(false);
 
@@ -90,6 +92,43 @@ export default function HomePage() {
     }
   }
 
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedFile) {
+      setStatus("Choose a .txt or .pdf file before uploading.");
+      return;
+    }
+
+    setLoading(true);
+    setStatus("Uploading file, extracting text, and indexing chunks...");
+
+    try {
+      const formData = new FormData();
+      formData.append("title", title);
+      formData.append("source_label", sourceLabel);
+      formData.append("file", selectedFile);
+
+      const response = await fetch(`${API_BASE_URL}/documents/upload`, {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const payload: DocumentSummary = await response.json();
+      setStatus(`Uploaded ${payload.original_filename ?? payload.title} and indexed ${payload.chunk_count} chunks.`);
+      setSelectedFile(null);
+      await refreshWorkspace();
+    } catch (error) {
+      setStatus("The backend could not upload that file. Check the FastAPI logs for extraction errors.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleQuery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -124,8 +163,8 @@ export default function HomePage() {
           <span className="eyebrow">Portfolio MVP</span>
           <h1>Grounded answers with retrieval you can inspect.</h1>
           <p>
-            This first build focuses on the engineering core of a serious RAG system:
-            ingestion, chunking, retrieval, answer composition, and explicit citations.
+            This build now includes persistent document storage plus direct file uploads, so the
+            project demonstrates a more realistic ingestion pipeline instead of a purely in-memory demo.
           </p>
           <div className="stats">
             <div className="stat-card">
@@ -160,11 +199,32 @@ export default function HomePage() {
                 />
               </div>
               <div className="field">
-                <label htmlFor="text">Document text</label>
+                <label htmlFor="text">Paste source text</label>
                 <textarea id="text" value={text} onChange={(event) => setText(event.target.value)} />
               </div>
               <button className="action" disabled={loading} type="submit">
-                Index document
+                Index pasted text
+              </button>
+            </form>
+
+            <div className="splitter">
+              <span />
+              <small>or upload source files</small>
+              <span />
+            </div>
+
+            <form onSubmit={handleUpload}>
+              <div className="field">
+                <label htmlFor="file">Upload .txt or .pdf</label>
+                <input
+                  id="file"
+                  type="file"
+                  accept=".txt,.pdf"
+                  onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                />
+              </div>
+              <button className="action secondary-action" disabled={loading} type="submit">
+                Upload and index file
               </button>
             </form>
 
@@ -172,9 +232,8 @@ export default function HomePage() {
               {documents.map((document) => (
                 <article className="document-card" key={document.id}>
                   <strong>{document.title}</strong>
-                  <small>
-                    {document.source_label} · {document.chunk_count} chunks
-                  </small>
+                  <small>{document.source_label} / {document.chunk_count} chunks</small>
+                  {document.original_filename ? <small>Uploaded from {document.original_filename}</small> : null}
                 </article>
               ))}
             </div>
@@ -208,9 +267,7 @@ export default function HomePage() {
                   {answer.citations.map((citation) => (
                     <article className="citation-card" key={citation.chunk_id}>
                       <strong>{citation.document_title}</strong>
-                      <small>
-                        {citation.source_label} · similarity {citation.score}
-                      </small>
+                      <small>{citation.source_label} / similarity {citation.score}</small>
                       <p>{citation.excerpt}</p>
                     </article>
                   ))}

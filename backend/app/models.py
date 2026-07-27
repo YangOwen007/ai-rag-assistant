@@ -1,19 +1,18 @@
 from dataclasses import dataclass, field
-from typing import List
 
 
-# A source document is the top-level unit users ingest into the system.
+# This dataclass represents raw source text before it is persisted and chunked.
 @dataclass
-class Document:
+class SourceDocument:
     id: str
     title: str
     source_label: str
     text: str
 
 
-# A chunk is the unit we actually embed and retrieve against during question answering.
+# This dataclass represents a retrieval unit produced by the chunker.
 @dataclass
-class Chunk:
+class SourceChunk:
     id: str
     document_id: str
     title: str
@@ -21,5 +20,4 @@ class Chunk:
     text: str
     start_char: int
     end_char: int
-    embedding: List[float] = field(default_factory=list)
-
+    embedding: list[float] = field(default_factory=list)

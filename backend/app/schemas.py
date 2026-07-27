@@ -36,10 +36,10 @@ class DocumentSummaryResponse(BaseModel):
     title: str
     source_label: str
     chunk_count: int
+    original_filename: str | None = None
 
 
 class HealthResponse(BaseModel):
     status: str
     indexed_chunks: int
     indexed_documents: int
-

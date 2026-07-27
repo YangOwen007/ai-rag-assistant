@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.models import Chunk, Document
+from app.models import SourceChunk, SourceDocument
 
 
 # This helper normalizes whitespace so chunking behaves more predictably across documents.
@@ -9,9 +9,9 @@ def normalize_text(text: str) -> str:
 
 
 # This splitter creates overlapping character windows to preserve local context across chunk boundaries.
-def chunk_document(document: Document, chunk_size: int, chunk_overlap: int) -> list[Chunk]:
+def chunk_document(document: SourceDocument, chunk_size: int, chunk_overlap: int) -> list[SourceChunk]:
     normalized = normalize_text(document.text)
-    chunks: list[Chunk] = []
+    chunks: list[SourceChunk] = []
     start = 0
     index = 0
 
@@ -20,7 +20,7 @@ def chunk_document(document: Document, chunk_size: int, chunk_overlap: int) -> l
         chunk_text = normalized[start:end]
 
         chunks.append(
-            Chunk(
+            SourceChunk(
                 id=f"{document.id}-chunk-{index}",
                 document_id=document.id,
                 title=document.title,
@@ -38,4 +38,3 @@ def chunk_document(document: Document, chunk_size: int, chunk_overlap: int) -> l
         index += 1
 
     return chunks
-
