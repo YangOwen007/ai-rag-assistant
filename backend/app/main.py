@@ -3,6 +3,10 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from fastapi.responses import JSONResponse
+from openai import APIError
 
 from app.config import settings
 from app.db import get_db_session
@@ -15,6 +19,8 @@ from app.schemas import (
 )
 from app.services.extraction import extract_text_from_upload
 from app.services.rag import RAGService
+from app.limits import BodyLimitMiddleware
+from app.db_models import DocumentRecord
 
 
 # The FastAPI app wires API endpoints to the retrieval pipeline.
@@ -23,14 +29,53 @@ app = FastAPI(title=settings.app_name)
 # CORS is enabled for local frontend development while the UI lives on a separate port.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=settings.allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+app.add_middleware(BodyLimitMiddleware, max_bytes=settings.max_upload_bytes + 64 * 1024)
 
 # This service instance now talks to persistent storage through request-scoped sessions.
 rag_service = RAGService(settings=settings)
+
+
+# External failures return useful categories without leaking connection strings or provider details.
+@app.exception_handler(SQLAlchemyError)
+async def database_error(request, exc):
+    return JSONResponse(status_code=503, content={"detail": "Database unavailable or migrations required."})
+
+
+@app.exception_handler(APIError)
+async def provider_error(request, exc):
+    return JSONResponse(status_code=502, content={"detail": "Embedding provider unavailable. Try again later."})
+
+
+@app.exception_handler(ValueError)
+async def validation_error(request, exc):
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.get("/live")
+def live():
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready(db: Annotated[Session, Depends(get_db_session)]):
+    # Checking columns and embedding compatibility detects incomplete upgrades before traffic.
+    db.execute(select(DocumentRecord).limit(1))
+    rag_service.check_embedding_profile(db)
+    return {"status": "ready"}
+
+
+@app.delete("/documents/{document_id}", status_code=204)
+def delete_document(document_id: str, db: Annotated[Session, Depends(get_db_session)]):
+    document = db.get(DocumentRecord, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    db.delete(document)
+    db.commit()
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -62,20 +107,23 @@ def ingest_text(
 
 
 @app.post("/documents/upload", response_model=DocumentSummaryResponse)
-async def upload_document(
+def upload_document(
     db: Annotated[Session, Depends(get_db_session)],
     title: Annotated[str, Form(min_length=3, max_length=200)],
     source_label: Annotated[str, Form(min_length=2, max_length=100)],
     file: UploadFile = File(...),
 ) -> DocumentSummaryResponse:
-    content = await file.read()
+    # A synchronous route runs extraction and model calls in FastAPI's worker thread pool.
+    content = file.file.read(settings.max_upload_bytes + 1)
+    if len(content) > settings.max_upload_bytes:
+        raise HTTPException(status_code=413, detail="File exceeds the upload limit.")
 
     try:
         extracted_text = extract_text_from_upload(file.filename, content)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="Uploaded text files must be UTF-8 encoded.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if len(extracted_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="The uploaded file did not contain enough extractable text.")

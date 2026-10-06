@@ -16,7 +16,7 @@ Base = declarative_base()
 def _build_engine():
     # SQLite needs a special connection option for local FastAPI thread usage.
     connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-    built_engine = create_engine(settings.database_url, future=True, connect_args=connect_args)
+    built_engine = create_engine(settings.database_url, future=True, connect_args=connect_args, pool_pre_ping=True)
 
     if settings.is_postgres:
         from pgvector.psycopg import register_vector

@@ -1,17 +1,19 @@
 from typing import List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # This request accepts plain text so we can validate the retrieval pipeline before file upload work.
 class IngestTextRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     title: str = Field(min_length=3, max_length=200)
     source_label: str = Field(min_length=2, max_length=100)
-    text: str = Field(min_length=50)
+    text: str = Field(min_length=50, max_length=100_000)
 
 
 # This model captures the question we want to answer with grounded retrieval.
 class QueryRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     question: str = Field(min_length=5, max_length=500)
     top_k: int | None = Field(default=None, ge=1, le=10)
 

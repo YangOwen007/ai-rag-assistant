@@ -1,108 +1,122 @@
 # AI RAG Assistant
 
-An internship-ready retrieval-augmented generation assistant focused on grounded answers, traceable citations, and a clear ingestion pipeline.
+A study project for inspecting document retrieval: upload text or a PDF, ask a question, and inspect the matching excerpts and source citations.
 
-## Current state
+![Local retrieval screen with synthetic source text](docs/images/retrieval-review.jpg)
 
-This repository started empty, so the first build establishes:
+## Current Status
 
-- A `FastAPI` backend with a commented RAG pipeline
-- Persistent document and chunk storage through `SQLAlchemy`
-- Text and PDF upload ingestion
-- Alembic migrations for schema management
-- A `pgvector`-ready retrieval path for PostgreSQL plus a SQLite fallback for local development
-- A `Next.js + TypeScript` frontend for ingestion and question answering
-- An embeddings provider abstraction with deterministic local embeddings and optional OpenAI embeddings
-- Project docs and evaluation fixtures that make the architecture easy to explain in interviews
+The app persists documents and overlapping chunks, embeds them, and ranks evidence for a question. Responses use a fixed excerpt template; **LLM answer generation is not implemented**. The default offline embedder hashes words and does not understand meaning. Optional OpenAI embeddings provide a separate vector space and require an API key.
 
-## Recommended MVP scope
+The deployment target is a **private, single-workspace Docker Compose host**. There is no public hosted demo. Everyone with access to the app can read, add, query, and delete the shared collection. Keep it on localhost, behind an SSH tunnel, or behind an authenticated HTTPS gateway. It is not suitable for anonymous public access or multiple independent users.
 
-This MVP is scoped as a study and research assistant that can:
+## Features And Tradeoffs
 
-- ingest text documents
-- chunk them into retrieval-friendly segments
-- embed and index chunks
-- retrieve relevant chunks for a question
-- answer with grounded citations
-- expose simple retrieval diagnostics
+- Paste text or upload UTF-8 `.txt` and text-based `.pdf` files.
+- Inspect citation titles, labels, excerpts, and cosine similarity scores.
+- Store documents and chunks in SQLite locally or PostgreSQL with pgvector in Compose.
+- Manage schema changes through Alembic; reject incompatible embedding profiles.
+- Limit uploads to 5 MiB, PDFs to 100 pages, and extracted text to 100,000 characters.
+- Delete a document and its chunks through `DELETE /documents/{id}` (or `/api/documents/{id}` through the UI server).
 
-That scope is narrow enough to finish cleanly and strong enough to demonstrate real AI engineering decisions.
+FastAPI and Pydantic validate API inputs; SQLAlchemy owns persistence; Next.js, React, and TypeScript provide the UI. Python dependencies are locked in `backend/uv.lock`, and frontend dependencies in `frontend/package-lock.json`. Containers use Python 3.13 and Node 24. Next.js proxies `/api` to FastAPI so browser assets do not need a deployment-specific API URL.
 
-## Target production stack
-
-- Backend: `Python + FastAPI`
-- Frontend: `Next.js + TypeScript`
-- Database: `PostgreSQL`
-- Vector storage: `pgvector`
-- Validation/config: `Pydantic`
-
-## Why the backend currently uses a local embedding fallback
-
-The current implementation keeps the core retrieval pipeline runnable without needing:
-
-- API keys
-- external model calls in local development
-- a running PostgreSQL instance for every contributor
-
-This is useful for learning and for fast iteration. The code is structured so we can later swap in:
-
-- `OpenAI` embeddings by setting `RAG_EMBEDDING_PROVIDER=openai`
-- `PostgreSQL + pgvector` as the default deployed database/vector path
-- background ingestion jobs
-- OCR for scanned PDFs
-
-without rewriting the application shape.
-
-## Project layout
+## Architecture
 
 ```text
-backend/    FastAPI app, RAG services, and tests
-frontend/   Next.js UI
-docs/       Architecture notes
-eval/       Sample RAG evaluation fixtures
+Browser -> Next.js /api proxy -> FastAPI -> SQLAlchemy -> SQLite / PostgreSQL
+                                   |
+                    extract -> normalize -> chunk -> embed -> store
+                    question -> embed -> rank -> excerpt template + citations
 ```
 
-## Architecture summary
+PostgreSQL ranks vectors in SQL using pgvector and has an HNSW index. SQLite loads chunks and ranks them in Python, which is simpler for local testing but scales poorly. Embeddings are fixed at 128 dimensions by the schema. [Architecture notes](docs/architecture.md) explain compatibility and retrieval limitations.
 
-1. Documents are ingested into the backend.
-2. Source text is persisted along with document metadata.
-3. Text is normalized and chunked with overlap.
-4. Chunks are embedded through a provider abstraction and stored in the database.
-5. PostgreSQL deployments can use `pgvector` cosine search, while SQLite development falls back to application-side ranking.
-6. The answer composer builds a grounded response using retrieved context.
-7. The API returns the answer plus citations and retrieval evidence.
+## Run With Docker
 
-## Running locally
+Prerequisite: Docker Engine/Desktop with Compose v2 and Linux containers. From a clean checkout:
 
-### Backend
+```powershell
+git clone https://github.com/YangOwen007/ai-rag-assistant.git
+cd ai-rag-assistant
+./scripts/configure.ps1
+docker compose up --build -d
+docker compose ps
+./scripts/smoke.ps1
+```
 
-```bash
+On Linux/macOS, use `sh scripts/configure.sh` instead of the PowerShell configure script. Open [127.0.0.1:3000](http://127.0.0.1:3000). Use this IPv4 address because Compose binds IPv4 loopback; `localhost` may resolve to another IPv6 listener on Windows. If port 3000 is occupied, change `APP_PORT` in root `.env` and supply that port to `scripts/smoke.ps1 -BaseUrl`. No database port is published, so other projects can continue using port 5432.
+
+The configure script creates an ignored `.env` containing a randomly generated database password. Never paste it into an issue or commit it. Startup waits for PostgreSQL, runs migrations, then checks backend readiness. [Deployment guide](docs/deployment.md) covers updates, verification, backups, rollback, and remote access.
+
+## Develop Without Docker
+
+Install Python 3.13, Node 24, and [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.10.7 or newer. Run from two terminals:
+
+```powershell
 cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .[dev]
-alembic upgrade head
-uvicorn app.main:app --reload
+uv sync --frozen --extra dev
+uv run alembic upgrade head
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Optional:
-- Set `RAG_DATABASE_URL=postgresql+psycopg://rag_user:rag_password@localhost:5432/rag_assistant` when you want to point the app at PostgreSQL instead of the default local SQLite database.
-- Copy `backend/.env.example` to `backend/.env` and switch `RAG_EMBEDDING_PROVIDER=openai` when you are ready to use production embeddings.
-
-### Frontend
-
-```bash
+```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000` in `frontend/.env.local` if needed.
+For a local production build, use `npm run build` followed by `npm start -- --hostname 127.0.0.1`. The backend production start command is `uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log`. Apply migrations before starting it.
 
-## Next build steps
+## Configuration
 
-- stand up a real PostgreSQL instance with the `vector` extension and validate the `pgvector` retrieval path end to end
-- add answer generation through a real LLM instead of the current deterministic answer composer
-- add OCR for scanned PDFs
-- build an evaluation harness for retrieval tuning
-- add background ingestion jobs and deployment manifests
+Root `.env` configures Compose; `backend/.env` optionally configures non-container development. Templates live in root, backend, and frontend `.env.example` files.
+
+| Variable | Purpose | Required |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | Random URL-safe hex password for Compose database | Compose |
+| `APP_PORT` | Host loopback port, default 3000 | No |
+| `RAG_DATABASE_URL` | SQLite path or `postgresql+psycopg` URL; Compose sets it | No for local SQLite |
+| `RAG_EMBEDDING_PROVIDER` | `deterministic` (default) or `openai` | No |
+| `RAG_OPENAI_API_KEY` | Server-side embedding credential | OpenAI mode only |
+| `RAG_OPENAI_EMBEDDING_MODEL` | Default `text-embedding-3-small` | No |
+| `RAG_EMBEDDING_DIMENSIONS` | Must be 128; schema changes require migration | No |
+| `RAG_ALLOWED_ORIGINS` | JSON origin list for direct backend access | No |
+| `API_INTERNAL_URL` | Next.js build-time proxy target; Compose sets it | No |
+
+Changing providers or models requires exporting, deleting, and re-ingesting existing documents. Old process-random embeddings are marked `legacy` by the migration; the API refuses to mix them with new vectors. Back up existing data before upgrading. Do not stamp a migration onto an older database with existing tables without inspecting its schema first.
+
+## Verification
+
+```powershell
+cd backend
+uv run --extra dev pytest -q
+uv run --extra dev ruff check .
+uv run --extra dev pip-audit
+```
+
+```powershell
+cd frontend
+npm ci
+npm run typecheck
+npm run build
+npm audit
+```
+
+CI runs these checks and scans Git history for secrets. Container integration checks use a disposable Compose database. Sample files in `eval/` are proposed cases, not benchmark results; there is no measured retrieval accuracy claim.
+
+## Security And Privacy
+
+Source text, filenames, titles, and embeddings persist in the database. Original uploaded files are not retained, and there is no analytics integration. OpenAI mode sends source chunks and questions to that provider; deterministic mode makes no model calls. Do not upload sensitive documents to a shared demonstration instance. Document deletion does not erase database backups or third-party retention. Protect and expire backups separately.
+
+The app has no login, per-user authorization, rate limiter, storage quota, or isolated PDF worker. Size limits reduce common mistakes but do not make hostile PDF parsing safe. Use a trusted private workspace. [Security policy](SECURITY.md) describes reporting and deployment boundaries.
+
+## Known Limitations And Next Steps
+
+- No LLM generation, OCR, hybrid search, reranker, relevance threshold, or retrieval benchmark.
+- Character windows can split words; citation excerpts may truncate important context.
+- Ingestion is synchronous; parsing and embeddings occupy worker threads.
+- Authentication, quotas, rate limits, parser isolation, and user-owned documents are required before public access.
+- Backups, access controls, monitoring, and HTTPS hosting are operator responsibilities.
+
+The next useful product step is a small retrieval evaluation corpus, followed by evidence-based retrieval improvements. Licensing has not been selected; no license grant is implied by publishing the repository.

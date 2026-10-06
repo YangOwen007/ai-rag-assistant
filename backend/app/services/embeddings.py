@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import hashlib
 from typing import Protocol
 
 from app.config import Settings
@@ -39,7 +40,8 @@ class DeterministicEmbeddingProvider:
         vector = [0.0] * self.dimensions
 
         for token in text.lower().split():
-            slot = hash(token) % self.dimensions
+            # Python hash() changes between processes; SHA-256 keeps saved vectors reusable.
+            slot = int.from_bytes(hashlib.sha256(token.encode("utf-8")).digest()[:8], "big") % self.dimensions
             vector[slot] += 1.0
 
         return normalize_vector(vector)
@@ -50,7 +52,7 @@ class OpenAIEmbeddingProvider:
         from openai import OpenAI
 
         self.settings = settings
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.client = OpenAI(api_key=settings.openai_api_key, timeout=30, max_retries=1)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -82,4 +84,4 @@ def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
 
 # Cosine similarity is the core retrieval metric for the first MVP.
 def cosine_similarity(left: list[float], right: list[float]) -> float:
-    return sum(a * b for a, b in zip(left, right))
+    return sum(a * b for a, b in zip(left, right, strict=True))

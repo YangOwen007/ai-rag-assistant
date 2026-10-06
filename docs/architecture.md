@@ -1,51 +1,19 @@
-# RAG Assistant Architecture
+# Architecture
 
-## Recommended MVP architecture
+The system has three services in Compose: Next.js, FastAPI, and PostgreSQL with pgvector. A short-lived migration container applies Alembic revisions before the backend starts. SQLite is a development alternative.
 
-The project is designed around a simple but credible flow:
+## Ingestion And Retrieval
 
-1. `Ingestion`
-   Accept source text, uploads, and metadata.
-2. `Chunking`
-   Split text into overlapping windows so retrieval can return focused evidence.
-3. `Embedding`
-   Convert chunks into vectors through a provider abstraction. The current build supports a deterministic local provider and an optional OpenAI provider.
-4. `Persistence`
-   Store documents and chunks in SQLAlchemy-managed tables so retrieval survives restarts.
-5. `Retrieval`
-   Rank chunks by semantic similarity to the question, using `pgvector` in PostgreSQL and a Python fallback in SQLite.
-6. `Grounded generation`
-   Compose an answer using only retrieved context and return citations.
-7. `Evaluation`
-   Measure whether the right chunks are retrieved and whether citations point to the right evidence.
+Text is normalized to single spaces, split into 600-character windows with 120-character overlap, and embedded. Document source text and chunk offsets are retained; offsets refer to normalized text, not PDF pages or the original bytes. A document and its chunks commit together after embedding succeeds.
 
-## Why this is a good portfolio shape
+The offline provider hashes lowercase whitespace-separated tokens with SHA-256 into 128 bins and normalizes the vector. It is reproducible across processes but collisions and punctuation affect results. It is lexical rather than semantic. OpenAI embeddings use a separate provider and model profile. Profile mismatches stop ingestion/query rather than combine unrelated vector spaces.
 
-- It demonstrates more than a chat wrapper.
-- It separates ingestion, retrieval, and answer orchestration.
-- It makes room for evaluation, which recruiters often do not see in student projects.
-- It can grow naturally into a production-style service.
+Queries embed the question and retrieve up to four chunks. PostgreSQL uses cosine distance; SQLite calculates dot products on normalized vectors. HNSW is an approximate index and small tables may use a sequential scan. A fixed template quotes the first two citation excerpts. This is evidence presentation, not language-model reasoning or a factuality guarantee. Unrelated queries can still return nearest neighbors.
 
-## Planned evolution path
+## Storage And Boundaries
 
-### Phase 1
+Documents own chunks through an ORM cascade. The delete endpoint removes both; backups have independent retention. The schema fixes vector dimensions at 128. Alembic's second revision marks older documents as legacy because their embeddings used Python's randomized hash. Re-ingestion requires the owner to preserve/export the source first.
 
-- text and PDF ingestion
-- deterministic embeddings
-- persistent document and chunk storage
-- grounded answer API
-- migration support
+FastAPI's body limit bounds input before parsing, and file/text/page limits constrain ingestion. Parsing runs in a thread pool rather than blocking the async event loop, but a malicious PDF can still consume excessive CPU or expanded memory. A separate resource-limited worker is a future change. The current trusted-workspace deployment is intentionally loopback-only.
 
-### Phase 2
-
-- OpenAI embeddings in deployed environments
-- verified PostgreSQL persistence
-- verified `pgvector` retrieval in production-like environments
-- document filters
-
-### Phase 3
-
-- hybrid search
-- reranking
-- streaming responses
-- retrieval benchmarking dashboard
+Tests use a separate in-memory engine via dependency overrides and never drop application tables. Deployment checks use actual PostgreSQL and migrations, which exercise behavior that SQLite unit tests cannot establish.

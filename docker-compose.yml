@@ -1,18 +1,57 @@
-version: "3.9"
-
+# Private single-workspace deployment. Only the frontend is published on loopback.
+name: ai-rag-assistant
 services:
   postgres:
-    image: pgvector/pgvector:pg16
-    container_name: rag-postgres
+    image: pgvector/pgvector:0.8.2-pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     environment:
       POSTGRES_DB: rag_assistant
       POSTGRES_USER: rag_user
-      POSTGRES_PASSWORD: rag_password
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in root .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_user -d rag_assistant"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+  migrate:
+    build: ./backend
+    image: ai-rag-assistant-backend:local
+    environment: &backend_env
+      RAG_DATABASE_URL: postgresql+psycopg://rag_user:${POSTGRES_PASSWORD}@postgres:5432/rag_assistant
+      RAG_EMBEDDING_PROVIDER: ${RAG_EMBEDDING_PROVIDER:-deterministic}
+      RAG_OPENAI_API_KEY: ${RAG_OPENAI_API_KEY:-}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  backend:
+    build: ./backend
+    image: ai-rag-assistant-backend:local
+    environment: *backend_env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
 volumes:
   postgres_data:
 

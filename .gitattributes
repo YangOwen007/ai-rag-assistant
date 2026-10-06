@@ -1,0 +1,2 @@
+# Shell scripts and container inputs must keep Unix newlines on Windows checkouts.
+* text=auto eol=lf

@@ -18,6 +18,17 @@ class RAGService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.embedding_provider = build_embedding_provider(settings)
+        self.embedding_profile = (
+            f"{settings.embedding_provider}:{settings.openai_embedding_model if settings.embedding_provider == 'openai' else 'sha256-v1'}:128"
+        )
+
+    def check_embedding_profile(self, session: Session) -> None:
+        # Refuse mixed vector spaces, including documents created with the old randomized hash.
+        incompatible = session.scalar(select(DocumentRecord.id).where(
+            DocumentRecord.embedding_profile != self.embedding_profile
+        ).limit(1))
+        if incompatible:
+            raise ValueError("Indexed documents use a different embedding profile. Export, delete, and re-ingest them before querying or adding documents.")
 
     def ingest_text(
         self,
@@ -28,6 +39,9 @@ class RAGService:
         original_filename: str | None = None,
         content_type: str | None = None,
     ) -> DocumentSummaryResponse:
+        self.check_embedding_profile(session)
+        if len(text.strip()) < 50 or len(text) > self.settings.max_text_chars:
+            raise ValueError(f"Source text must contain 50 to {self.settings.max_text_chars} characters.")
         document = SourceDocument(
             id=str(uuid4()),
             title=title,
@@ -49,6 +63,7 @@ class RAGService:
                 raw_text=document.text,
                 original_filename=original_filename,
                 content_type=content_type,
+                embedding_profile=self.embedding_profile,
             )
         )
 
@@ -103,6 +118,7 @@ class RAGService:
         ]
 
     def answer_question(self, session: Session, question: str, top_k: int | None = None) -> QueryResponse:
+        self.check_embedding_profile(session)
         effective_top_k = top_k or self.settings.top_k
         query_embedding = self.embedding_provider.embed_query(question)
         ranked_chunks = self._search_chunks(

@@ -5,10 +5,9 @@ from app.main import app
 
 # This fixture text gives the retrieval pipeline a realistic-enough knowledge base for tests.
 PROJECT_BRIEF = """
-The AI RAG assistant is meant to demonstrate practical AI engineering through
-document ingestion, chunking, embeddings, retrieval, grounded answers, and
-traceable citations. The MVP should feel more serious than a toy chatbot and
-should be easy to explain in internship interviews.
+Document retrieval accepts text, creates overlapping chunks, stores vectors,
+and returns excerpts with traceable source citations. This collection explains
+how ingestion, persistence, and question ranking work together.
 """
 
 def test_ingest_text_creates_chunks() -> None:

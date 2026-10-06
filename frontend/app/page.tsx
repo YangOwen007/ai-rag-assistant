@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 
 type HealthResponse = {
@@ -31,7 +31,7 @@ type QueryResponse = {
   retrieval_summary: string;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
 const starterText = `Retrieval-augmented generation combines information retrieval with answer generation.
 In this project, the goal is to build a grounded assistant that can ingest documents, retrieve relevant chunks,
@@ -40,6 +40,7 @@ and return answers with citations so users can inspect the supporting evidence.`
 
 // This page provides one polished screen for text ingestion, file uploads, querying, and evidence inspection.
 export default function HomePage() {
+  const fileInput = useRef<HTMLInputElement>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [answer, setAnswer] = useState<QueryResponse | null>(null);
@@ -53,7 +54,7 @@ export default function HomePage() {
 
   // This startup load gives the dashboard a quick health snapshot and any indexed documents.
   useEffect(() => {
-    void refreshWorkspace();
+    void refreshWorkspace().catch(() => setStatus("Cannot reach the backend. Check its configuration and database readiness."));
   }, []);
 
   async function refreshWorkspace() {
@@ -62,8 +63,33 @@ export default function HomePage() {
       fetch(`${API_BASE_URL}/documents`)
     ]);
 
+    if (!healthResponse.ok || !documentsResponse.ok) {
+      throw new Error("Workspace unavailable");
+    }
     setHealth(await healthResponse.json());
     setDocuments(await documentsResponse.json());
+  }
+
+  // Display safe backend validation messages instead of treating every error as an outage.
+  async function requireSuccess(response: Response) {
+    if (response.ok) return;
+    const payload = await response.json().catch(() => null);
+    throw new Error(typeof payload?.detail === "string" ? payload.detail : `Request failed (${response.status}). Check your input or backend availability.`);
+  }
+
+  async function handleDelete(document: DocumentSummary) {
+    if (!window.confirm(`Delete ${document.title} and all its indexed chunks?`)) return;
+    setLoading(true);
+    try {
+      await requireSuccess(await fetch(`${API_BASE_URL}/documents/${document.id}`, { method: "DELETE" }));
+      setAnswer(null);
+      await refreshWorkspace();
+      setStatus(`Deleted ${document.title}. Backups may still contain this document.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Deletion failed.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleIngest(event: FormEvent<HTMLFormElement>) {
@@ -78,15 +104,13 @@ export default function HomePage() {
         body: JSON.stringify({ title, source_label: sourceLabel, text })
       });
 
-      if (!response.ok) {
-        throw new Error("Ingestion failed");
-      }
+      await requireSuccess(response);
 
       const payload: DocumentSummary = await response.json();
       setStatus(`Indexed ${payload.chunk_count} chunks from ${payload.title}.`);
       await refreshWorkspace();
     } catch (error) {
-      setStatus("The backend could not ingest that document. Check that FastAPI is running.");
+      setStatus(error instanceof Error ? error.message : "Ingestion failed.");
     } finally {
       setLoading(false);
     }
@@ -114,16 +138,15 @@ export default function HomePage() {
         body: formData
       });
 
-      if (!response.ok) {
-        throw new Error("Upload failed");
-      }
+      await requireSuccess(response);
 
       const payload: DocumentSummary = await response.json();
       setStatus(`Uploaded ${payload.original_filename ?? payload.title} and indexed ${payload.chunk_count} chunks.`);
       setSelectedFile(null);
+      if (fileInput.current) fileInput.current.value = "";
       await refreshWorkspace();
     } catch (error) {
-      setStatus("The backend could not upload that file. Check the FastAPI logs for extraction errors.");
+      setStatus(error instanceof Error ? error.message : "Upload failed.");
     } finally {
       setLoading(false);
     }
@@ -141,16 +164,14 @@ export default function HomePage() {
         body: JSON.stringify({ question })
       });
 
-      if (!response.ok) {
-        throw new Error("Query failed");
-      }
+      await requireSuccess(response);
 
       const payload: QueryResponse = await response.json();
       setAnswer(payload);
       setStatus(payload.retrieval_summary);
       await refreshWorkspace();
     } catch (error) {
-      setStatus("The backend could not answer that question. Check that FastAPI is running.");
+      setStatus(error instanceof Error ? error.message : "Query failed.");
     } finally {
       setLoading(false);
     }
@@ -160,11 +181,11 @@ export default function HomePage() {
     <main className="page-shell">
       <div className="page-grid">
         <section className="hero">
-          <span className="eyebrow">Portfolio MVP</span>
-          <h1>Grounded answers with retrieval you can inspect.</h1>
+          <span className="eyebrow">Document retrieval</span>
+          <h1>Find source evidence you can inspect.</h1>
           <p>
-            This build now includes persistent document storage plus direct file uploads, so the
-            project demonstrates a more realistic ingestion pipeline instead of a purely in-memory demo.
+            Upload text or a PDF, then ask a question to see matching excerpts and citations.
+            Responses summarize retrieved evidence using a fixed template, without language-model generation.
           </p>
           <div className="stats">
             <div className="stat-card">
@@ -173,7 +194,7 @@ export default function HomePage() {
             </div>
             <div className="stat-card">
               <strong>{health?.indexed_chunks ?? 0}</strong>
-              Retrieved chunks
+              Indexed chunks
             </div>
             <div className="stat-card">
               <strong>{health?.status ?? "offline"}</strong>
@@ -188,19 +209,20 @@ export default function HomePage() {
             <form onSubmit={handleIngest}>
               <div className="field">
                 <label htmlFor="title">Document title</label>
-                <input id="title" value={title} onChange={(event) => setTitle(event.target.value)} />
+                <input id="title" required minLength={3} maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
               </div>
               <div className="field">
                 <label htmlFor="source-label">Source label</label>
                 <input
                   id="source-label"
+                  required minLength={2} maxLength={100}
                   value={sourceLabel}
                   onChange={(event) => setSourceLabel(event.target.value)}
                 />
               </div>
               <div className="field">
                 <label htmlFor="text">Paste source text</label>
-                <textarea id="text" value={text} onChange={(event) => setText(event.target.value)} />
+                <textarea id="text" required minLength={50} maxLength={100000} value={text} onChange={(event) => setText(event.target.value)} />
               </div>
               <button className="action" disabled={loading} type="submit">
                 Index pasted text
@@ -218,6 +240,7 @@ export default function HomePage() {
                 <label htmlFor="file">Upload .txt or .pdf</label>
                 <input
                   id="file"
+                  ref={fileInput}
                   type="file"
                   accept=".txt,.pdf"
                   onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
@@ -229,11 +252,13 @@ export default function HomePage() {
             </form>
 
             <div className="document-list">
+              {documents.length === 0 ? <p>No documents indexed yet.</p> : null}
               {documents.map((document) => (
                 <article className="document-card" key={document.id}>
                   <strong>{document.title}</strong>
                   <small>{document.source_label} / {document.chunk_count} chunks</small>
                   {document.original_filename ? <small>Uploaded from {document.original_filename}</small> : null}
+                  <button className="delete-action" disabled={loading} onClick={() => void handleDelete(document)} aria-label={`Delete ${document.title}`}>Delete document</button>
                 </article>
               ))}
             </div>
@@ -246,6 +271,7 @@ export default function HomePage() {
                 <label htmlFor="question">Question</label>
                 <textarea
                   id="question"
+                  required minLength={5} maxLength={500}
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                 />
@@ -255,7 +281,7 @@ export default function HomePage() {
               </button>
             </form>
 
-            <p className="status">{status}</p>
+            <p className="status" role="status" aria-live="polite">{status}</p>
 
             {answer ? (
               <>

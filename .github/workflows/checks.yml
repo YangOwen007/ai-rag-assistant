@@ -1,0 +1,47 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.10.7'
+          python-version: '3.13'
+      - run: uv sync --frozen --extra dev
+        working-directory: backend
+      - run: uv run --extra dev ruff check . && uv run --extra dev pytest -q && uv run --extra dev pip-audit && uv run alembic upgrade head && uv run alembic check
+        working-directory: backend
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run typecheck && npm run build && npm audit
+        working-directory: frontend
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      # Disable network and mount only read access while scanning commit history and current files.
+      - run: |
+          docker run --rm --network none --read-only -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.24.3@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 git /repo --config /repo/.gitleaks.toml --redact
+          docker run --rm --network none --read-only -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.24.3@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 dir /repo --config /repo/.gitleaks.toml --redact
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: sh scripts/configure.sh
+      - run: docker compose up --build -d --wait
+      - run: pwsh -File scripts/smoke.ps1
+      - if: always()
+        run: docker compose down

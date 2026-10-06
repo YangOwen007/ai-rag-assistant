@@ -28,6 +28,7 @@ class DocumentRecord(Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    embedding_profile: Mapped[str] = mapped_column(String(200), nullable=False, default="legacy")
 
     # The relationship makes it easy to navigate from a document to its retrieval units.
     chunks: Mapped[list["ChunkRecord"]] = relationship(
@@ -55,3 +56,10 @@ class ChunkRecord(Base):
 
     # The reverse relationship preserves the link back to the source document for citations.
     document: Mapped[DocumentRecord] = relationship(back_populates="chunks")
+
+
+# Include the PostgreSQL-only migration index in metadata so drift checks stay accurate.
+if settings.is_postgres:
+    Index("ix_chunks_embedding_hnsw", ChunkRecord.embedding, postgresql_using="hnsw",
+          postgresql_with={"m": 16, "ef_construction": 64},
+          postgresql_ops={"embedding": "vector_cosine_ops"})

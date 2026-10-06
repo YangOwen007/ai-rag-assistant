@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Exclude downloaded dependencies and local tool caches; app build assets remain scanned"
+paths = [
+  '''(^|/)\.venv/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.tmp-uv-cache/''',
+  '''(^|/)\.agents/''',
+  '''(^|/)\.codex/''',
+]

@@ -162,6 +162,22 @@ input[type="file"] {
   cursor: wait;
 }
 
+/* Visible keyboard focus and wrapping keep source metadata usable on small screens. */
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--accent-deep);
+  outline-offset: 3px;
+}
+.document-card, .citation-card, .answer-card { overflow-wrap: anywhere; }
+.delete-action {
+  margin-top: 10px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-deep);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .secondary-action {
   background: linear-gradient(135deg, #8b744f, #5d4d34);
 }
